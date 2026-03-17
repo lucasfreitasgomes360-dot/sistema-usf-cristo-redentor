@@ -36,9 +36,9 @@
         USF Cristo Redentor
     </div>
 
-    <div id="aviso-inicial" onclick="this.style.display='none'" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:999; display:flex; flex-direction:column; justify-content:center; align-items:center; cursor:pointer;">
+    <div id="aviso-inicial" onclick="this.style.display='none'; som.play().catch(()=>{});" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:999; display:flex; flex-direction:column; justify-content:center; align-items:center; cursor:pointer;">
         <h1 style="color:#ffcc00; font-size: 3rem;">TELA DA TV</h1>
-        <p style="color:white; font-size: 1.5rem;">CLIQUE PARA ATIVAR O SOM</p>
+        <p style="color:white; font-size: 1.5rem;">CLIQUE PARA ATIVAR O SOM E A VOZ</p>
     </div>
 
     <div class="topo">
@@ -77,105 +77,147 @@
         };
         firebase.initializeApp(firebaseConfig);
         const database = firebase.database();
+        
+        // --- CORREÇÕES E VARIÁVEIS GLOBAIS ---
         const som = new Audio('https://assets.mixkit.co/active_storage/sfx/2861/2861-preview.mp3');
         let histTv = [];
+        let listaAvisos = [];
+        let indiceAviso = 0;
+        let intervaloCarrossel;
+        let processandoChamada = false;
+        let filaDeEspera = [];
 
+        // Escuta novas chamadas do Firebase
         database.ref('fila_chamadas').on('child_added', (snap) => {
             const dados = snap.val();
             database.ref('fila_chamadas/' + snap.key).remove();
             chamar(dados);
         });
 
+        // Escuta os avisos para o carrossel
         database.ref('avisos_unidade').on('value', snap => {
-            listaAvisos = []; snap.forEach(child => { listaAvisos.push(child.val()); });
+            listaAvisos = []; 
+            snap.forEach(child => { listaAvisos.push(child.val()); });
             if (!processandoChamada) iniciarCarrossel();
         });
 
+        // Adiciona chamada na fila
+        function chamar(dados) {
+            filaDeEspera.push(dados);
+            if (!processandoChamada) iniciarFila();
+        }
+
         async function iniciarFila() {
             if (filaDeEspera.length === 0) { 
-                processandoChamada = false; document.getElementById('area-chamada').style.display = 'none'; 
-                document.getElementById('painel-informativo').style.display = 'block'; iniciarCarrossel(); return; 
+                processandoChamada = false; 
+                document.getElementById('area-chamada').style.display = 'none'; 
+                document.getElementById('painel-informativo').style.display = 'block'; 
+                iniciarCarrossel(); 
+                return; 
             }
-            processandoChamada = true; clearInterval(intervaloCarrossel);
+
+            processandoChamada = true; 
+            clearInterval(intervaloCarrossel);
+
             const atual = filaDeEspera.shift();
             let msgExibida = atual.msg.replace("COLABORADOR: ", "");
+            
             document.getElementById('area-chamada').style.display = 'block';
             document.getElementById('painel-informativo').style.display = 'none';
             document.getElementById('txtPaciente').innerText = msgExibida;
             document.getElementById('txtSala').innerText = atual.local;
-            document.body.classList.remove('piscar-alerta'); void document.body.offsetWidth; document.body.classList.add('piscar-alerta');
-            somCampainha.play().catch(e => {});
+            
+            document.body.classList.remove('piscar-alerta'); 
+            void document.body.offsetWidth; 
+            document.body.classList.add('piscar-alerta');
+            
+            som.play().catch(e => console.log("Erro som:", e));
             atualizarHistTV(msgExibida, atual.local);
+            
             await falarTexto(atual.msg, atual.local);
-            setTimeout(iniciarFila, 4000);
+            
+            // Tempo de exibição na tela antes de chamar o próximo ou voltar carrossel
+            setTimeout(iniciarFila, 5000);
         }
 
         function falarTexto(nome, local) {
-    return new Promise((resolve) => {
-        window.speechSynthesis.cancel();
-        
-        let loc = local.toLowerCase();
-        let prep = "ao"; 
-        if (loc.includes("recepção") || loc.includes("Classificação de Risco") || loc.includes("vacina") || loc.includes("coleta") || loc.includes("sala") || loc.includes("mesa") || loc.includes("gerência")) {
-            prep = "à"; 
+            return new Promise((resolve) => {
+                window.speechSynthesis.cancel();
+                
+                let loc = local.toLowerCase();
+                let prep = "ao"; 
+                if (loc.includes("recepção") || loc.includes("risco") || loc.includes("vacina") || loc.includes("coleta") || loc.includes("sala") || loc.includes("mesa") || loc.includes("gerência")) {
+                    prep = "à"; 
+                }
+
+                let nomeUpper = nome.toUpperCase();
+                let textoParaFalar = nome.replace(/PREF\./gi, "PREFERENCIAL");
+                let textoFinal = "";
+
+                if (nomeUpper.includes("SENHA")) {
+                    textoFinal = `Atenção. ${textoParaFalar}. Dirija-se ${prep} ${local}`;
+                } else if (nomeUpper.includes("COLABORADOR:")) {
+                    let nomeLimpo = textoParaFalar.replace(/COLABORADOR: /gi, "");
+                    textoFinal = `Atenção. Colaborador ${nomeLimpo}. Dirija-se ${prep} ${local}`;
+                } else {
+                    textoFinal = `Atenção. Paciente ${textoParaFalar}. Dirija-se ${prep} ${local}`;
+                }
+
+                const fala = new SpeechSynthesisUtterance(textoFinal);
+                fala.lang = 'pt-BR';
+                fala.rate = 0.9;
+                fala.onend = () => resolve();
+                fala.onerror = () => resolve();
+                
+                window.speechSynthesis.speak(fala);
+                // Fallback caso a voz falhe
+                setTimeout(resolve, 8000);
+            });
         }
-
-        let nomeUpper = nome.toUpperCase();
-        let textoParaFalar = nome;
-
-        // --- AJUSTE PARA FALAR POR EXTENSO ---
-        // Se o texto contiver "PREF.", trocamos por "PREFERENCIAL" apenas na voz
-        textoParaFalar = textoParaFalar.replace(/PREF\./gi, "PREFERENCIAL");
-        // -------------------------------------
-
-        let textoFinal = "";
-
-        if (nomeUpper.includes("SENHA")) {
-            textoFinal = `Atenção. ${textoParaFalar}. Dirija-se ${prep} ${local}`;
-        } else if (nomeUpper.includes("COLABORADOR:")) {
-            let nomeLimpo = textoParaFalar.replace(/COLABORADOR: /gi, "");
-            textoFinal = `Atenção. Colaborador ${nomeLimpo}. Dirija-se ${prep} ${local}`;
-        } else {
-            textoFinal = `Atenção. Paciente ${textoParaFalar}. Dirija-se ${prep} ${local}`;
-        }
-
-        const fala = new SpeechSynthesisUtterance(textoFinal);
-        fala.lang = 'pt-BR';
-        fala.rate = 0.9;
-        fala.onend = () => resolve();
-        fala.onerror = () => resolve();
-        
-        window.speechSynthesis.speak(fala);
-        setTimeout(resolve, 8000);
-    });
-}
 
         function iniciarCarrossel() {
             clearInterval(intervaloCarrossel);
-            if (listaAvisos.length === 0) { document.getElementById('texto-info').innerText = "USF Cristo Redentor - Dr. Carlos Alberto Jurgielewicz"; return; }
-            rodarFrase(); intervaloCarrossel = setInterval(rodarFrase, 12000);
+            if (listaAvisos.length === 0) { 
+                document.getElementById('texto-info').innerText = "USF Cristo Redentor - Dr. Carlos Alberto Jurgielewicz"; 
+                return; 
+            }
+            rodarFrase(); 
+            intervaloCarrossel = setInterval(rodarFrase, 12000);
         }
 
         function rodarFrase() {
-            if (processandoChamada) return;
+            if (processandoChamada || listaAvisos.length === 0) return;
+            
             const aviso = listaAvisos[indiceAviso];
             const card = document.getElementById('card-cor');
             const txt = document.getElementById('texto-info');
             const fill = document.getElementById('progresso-fill');
-            fill.style.transition = 'none'; fill.style.width = '0%';
-            fill.style.backgroundColor = aviso.cor;
-            card.style.borderLeftColor = aviso.cor;
-            txt.innerText = aviso.msg;
-            setTimeout(() => { fill.style.transition = 'width 11.5s linear'; fill.style.width = '100%'; }, 100);
+            
+            fill.style.transition = 'none'; 
+            fill.style.width = '0%';
+            
+            setTimeout(() => {
+                fill.style.backgroundColor = aviso.cor;
+                card.style.borderLeftColor = aviso.cor;
+                txt.innerText = aviso.msg;
+                fill.style.transition = 'width 11.5s linear'; 
+                fill.style.width = '100%'; 
+            }, 100);
+            
             indiceAviso = (indiceAviso + 1) % listaAvisos.length;
         }
 
         function atualizarHistTV(msg, local) {
-            histTv.unshift({msg, local}); if(histTv.length > 4) histTv.pop();
-            const p = document.getElementById('painel-historico'); p.innerHTML = "";
-            histTv.forEach(h => { p.innerHTML += `<div class="hist-item-tv"><b>${h.msg}</b><br><small>${h.local}</small></div>`; });
+            histTv.unshift({msg, local}); 
+            if(histTv.length > 4) histTv.pop();
+            const p = document.getElementById('painel-historico'); 
+            p.innerHTML = "";
+            histTv.forEach(h => { 
+                p.innerHTML += `<div class="hist-item-tv"><b>${h.msg}</b><br><small>${h.local}</small></div>`; 
+            });
         }
 
+        // Relógio
         setInterval(() => { 
             const agora = new Date();
             document.getElementById('relogio').innerText = agora.toLocaleTimeString('pt-BR');
