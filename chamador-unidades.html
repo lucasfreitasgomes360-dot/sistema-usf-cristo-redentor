@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Chamador - USF Cristo Redentor</title>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <style>
+        :root { --primary: #003366; --secondary: #007bff; --success: #28a745; --warning: #ff8c00; --info: #17a2b8; --light: #f8f9fa; }
+        body { font-family: 'Segoe UI', sans-serif; background: #eef2f7; display: flex; flex-direction: column; align-items: center; padding: 20px; margin: 0; min-height: 100vh; }
+        .container { background: white; padding: 30px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 450px; border-top: 10px solid var(--primary); }
+        .header-unidade { text-align: center; margin-bottom: 25px; }
+        .header-unidade h2 { color: var(--primary); margin: 0; font-size: 1.6rem; text-transform: uppercase; font-weight: 800; }
+        .card-setor { background: var(--light); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #dee2e6; }
+        label { font-weight: bold; display: block; margin-bottom: 8px; font-size: 0.85rem; color: var(--primary); text-transform: uppercase; }
+        select, input { width: 100%; padding: 14px; border-radius: 10px; border: 2px solid #ddd; box-sizing: border-box; font-size: 1rem; margin-bottom: 10px; }
+        .btn { border: none; border-radius: 10px; padding: 15px; font-weight: bold; font-size: 1rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; color: white; text-transform: uppercase; width: 100%; margin-bottom: 10px; }
+        .btn-blue { background: var(--secondary); }
+        .btn-orange { background: var(--warning); }
+        .btn-green { background: var(--success); }
+        .flex-row { display: flex; gap: 10px; }
+        .flex-row .btn { width: 50%; }
+        #toast { visibility: hidden; min-width: 250px; background: #333; color: #fff; text-align: center; border-radius: 30px; padding: 16px; position: fixed; z-index: 10; top: 30px; left: 50%; transform: translateX(-50%); opacity: 0; transition: 0.5s; }
+        #toast.show { visibility: visible; opacity: 1; top: 50px; }
+        .footer-creditos { margin-top: 30px; text-align: center; font-size: 0.75rem; color: #777; border-top: 1px solid #ddd; padding-top: 15px; width: 100%; }
+    </style>
+</head>
+<body>
+    <div id="toast">Operação realizada!</div>
+    <div class="container">
+        <div class="header-unidade">
+            <h2>USF Cristo Redentor</h2>
+        </div>
+        <div class="card-setor">
+            <label>Selecione seu Setor</label>
+            <select id="categoria" onchange="trocouCategoria()">
+                <option value="">-- Escolha o Setor --</option>
+                <option value="recepcao">🏢 RECEPÇÃO</option>
+                <option value="medico">🩺 MÉDICO</option>
+                <option value="enfermagem">💉 ENFERMAGEM</option>
+                <option value="odonto">🦷 ODONTOLOGIA</option>
+            </select>
+        </div>
+        <div id="areaChamada" style="display:none">
+            <div id="selecaoSala">
+                <label>Sua Sala/Local</label>
+                <select id="minhaSala" onchange="configurarTela()"></select>
+            </div>
+            <div id="interfaceRecepcao" style="display:none; margin-top: 15px;">
+                <div class="flex-row">
+                    <button class="btn btn-blue" onclick="gerarSenha('NORMAL', 'SENHA')">🟦 NORMAL</button>
+                    <button class="btn btn-orange" onclick="gerarSenha('PREFERENCIAL', 'SENHA PREF.')">🟧 PREF.</button>
+                </div>
+            </div>
+            <div id="interfaceNome" style="display:none; margin-top: 15px;">
+                <label>Nome do Paciente</label>
+                <input type="text" id="nomePaciente" placeholder="Digite o nome...">
+                <button class="btn btn-green" onclick="enviarChamadaNome()">📣 CHAMAR NA TV</button>
+            </div>
+        </div>
+    </div>
+    <div class="footer-creditos">
+        Desenvolvido por <b>Lucas Freitas Gomes</b> &copy; 2026<br>USF Cristo Redentor
+    </div>
+
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyAhXaVoK92AW03ltyYa5JwSZKXtAFylgYs",
+            authDomain: "painel-usf-224a5.firebaseapp.com",
+            projectId: "painel-usf-224a5",
+            databaseURL: "https://painel-usf-224a5-default-rtdb.firebaseio.com"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+
+        const config = {
+            recepcao: { salas: ["Guichê 01", "Guichê 02"], tipo: 'botoes' },
+            medico: { salas: ["Consultório 01", "Consultório 02", "Consultório 03"], tipo: 'nome' },
+            enfermagem: { salas: ["Triagem", "Vacina", "Procedimentos"], tipo: 'nome' },
+            odonto: { salas: ["Odontologia"], tipo: 'nome' }
+        };
+
+        function mostrarToast(msg) { const t = document.getElementById("toast"); t.innerText = msg; t.className = "show"; setTimeout(() => { t.className = ""; }, 3000); }
+
+        function trocouCategoria() {
+            const cat = document.getElementById('categoria').value;
+            const selSala = document.getElementById('minhaSala');
+            if (!cat) { document.getElementById('areaChamada').style.display="none"; return; }
+            selSala.innerHTML = "";
+            config[cat].salas.forEach(s => { let o = document.createElement('option'); o.value = s; o.innerText = s; selSala.appendChild(o); });
+            configurarTela();
+        }
+
+        function configurarTela() {
+            const cat = document.getElementById('categoria').value;
+            document.getElementById('interfaceRecepcao').style.display = (cat === 'recepcao') ? 'block' : 'none';
+            document.getElementById('interfaceNome').style.display = (config[cat].tipo === 'nome') ? 'block' : 'none';
+            document.getElementById('areaChamada').style.display = "block";
+        }
+
+        function gerarSenha(key, prefixo) {
+            database.ref('contador/' + key).transaction(v => (v || 0) + 1, (err, comm, snap) => {
+                if (comm) { enviarParaFirebase(`${prefixo} ${String(snap.val()).padStart(2, '0')}`); mostrarToast("Chamada enviada!"); }
+            });
+        }
+
+        function enviarChamadaNome() {
+            const input = document.getElementById('nomePaciente');
+            if(input.value.trim() !== "") { enviarParaFirebase(input.value.trim()); input.value = ""; mostrarToast("Chamada enviada!"); }
+        }
+
+        function enviarParaFirebase(texto) {
+            const sala = document.getElementById('minhaSala').value;
+            database.ref('fila_chamadas').push({ msg: texto, local: sala, hora: Date.now() });
+        }
+    </script>
+</body>
+</html>
